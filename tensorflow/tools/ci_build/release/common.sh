@@ -17,14 +17,24 @@
 
 # Keep in sync with tensorflow_estimator and configure.py.
 # LINT.IfChange
-LATEST_BAZEL_VERSION=0.29.1
+LATEST_BAZEL_VERSION=3.1.0
 # LINT.ThenChange(
 #   //tensorflow/opensource_only/configure.py,
 #   //tensorflow_estimator/google/kokoro/common.sh,
 #   //tensorflow/tools/ci_build/install/install_bazel.sh,
 #   //tensorflow/tools/ci_build/install/install_bazel_from_source.sh)
 
-# LINT.IfChange
+# Run flaky functions with retries.
+# run_with_retry cmd
+function run_with_retry {
+  eval "$1"
+  # If the command fails retry again in 60 seconds.
+  if [[ $? -ne 0 ]]; then
+    sleep 60
+    eval "$1"
+  fi
+}
+
 function die() {
   echo "$@" 1>&2 ; exit 1;
 }
@@ -39,8 +49,6 @@ function readable_run {
   echo "Command completed successfully at $(date)"
   set -x
 }
-# LINT.ThenChange(
-# ) # common_.sh
 
 # LINT.IfChange
 # Redirect bazel output dir b/73748835
@@ -49,15 +57,25 @@ function set_bazel_outdir {
   export TEST_TMPDIR=/tmpfs/bazel_output
 }
 
-# Run flaky functions with retries.
-# run_with_retry cmd
-function run_with_retry {
-  eval "$1"
-  # If the command fails retry again in 60 seconds.
-  if [[ $? -ne 0 ]]; then
-    sleep 60
-    eval "$1"
+# Downloads bazelisk to ~/bin as `bazel`.
+function install_bazelisk {
+  date
+  case "$(uname -s)" in
+    Darwin) local name=bazelisk-darwin-amd64 ;;
+    Linux)  local name=bazelisk-linux-amd64  ;;
+    *) die "Unknown OS: $(uname -s)" ;;
+  esac
+  mkdir -p "$HOME/bin"
+  wget --no-verbose -O "$HOME/bin/bazel" \
+      "https://github.com/bazelbuild/bazelisk/releases/download/v1.3.0/$name"
+  chmod u+x "$HOME/bin/bazel"
+  if [[ ! ":$PATH:" =~ :"$HOME"/bin/?: ]]; then
+    PATH="$HOME/bin:$PATH"
   fi
+  set_bazel_outdir
+  which bazel
+  bazel version
+  date
 }
 
 # Install the given bazel version on linux
@@ -85,26 +103,6 @@ function update_bazel_linux {
 # LINT.ThenChange(
 #   //tensorflow_estimator/google/kokoro/common.sh)
 
-# LINT.IfChange
-# Install the given bazel version on macos
-function update_bazel_macos {
-  if [[ -z "$1" ]]; then
-    BAZEL_VERSION=${LATEST_BAZEL_VERSION}
-  else
-    BAZEL_VERSION=$1
-  fi
-  BAZEL_COMMAND="curl -L https://github.com/bazelbuild/bazel/releases/download/${BAZEL_VERSION}/bazel-${BAZEL_VERSION}-installer-darwin-x86_64.sh -O && \
-  chmod +x bazel-*.sh && ./bazel-${BAZEL_VERSION}-installer-darwin-x86_64.sh --user && \
-  rm -f bazel-${BAZEL_VERSION}-installer-darwin-x86_64.sh"
-  # If the bazel update fails retry again in 60 seconds.
-  run_with_retry "${BAZEL_COMMAND}"
-  # Add new bazel installation to path
-  PATH="/Users/kbuilder/bin:$PATH"
-  set_bazel_outdir
-  which bazel
-  bazel version
-}
-
 function install_pip2 {
   curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
   sudo python2 get-pip.py
@@ -131,25 +129,26 @@ function install_pip_deps {
     shift
   done
 
+  # LINT.IfChange(ubuntu_pip_installations)
   # TODO(aselle): Change all these to be --user instead of sudo.
-  # TODO(hyey): Add back IfChange lint check (b/143530103).
-  # ===================================================================
-  # Please change dependencies in `install_ubuntu_16_pip_deps` as well.
-  # ===================================================================
-  ${SUDO_CMD} ${PIP_CMD} install keras_applications==1.0.8 --no-deps
+  ${SUDO_CMD} ${PIP_CMD} install astunparse==1.6.3
   ${SUDO_CMD} ${PIP_CMD} install keras_preprocessing==1.1.0 --no-deps
-  ${SUDO_CMD} ${PIP_CMD} install gast==0.2.2
-  ${SUDO_CMD} ${PIP_CMD} install h5py==2.8.0
+  "${PIP_CMD}" install numpy==1.16.0 --user
+  "${PIP_CMD}" install PyYAML==3.13 --user
+  ${SUDO_CMD} ${PIP_CMD} install gast==0.3.3
+  ${SUDO_CMD} ${PIP_CMD} install h5py==2.10.0
   ${SUDO_CMD} ${PIP_CMD} install six==1.12.0
   ${SUDO_CMD} ${PIP_CMD} install grpcio
   ${SUDO_CMD} ${PIP_CMD} install portpicker
   ${SUDO_CMD} ${PIP_CMD} install scipy
-  ${SUDO_CMD} ${PIP_CMD} install scikit-learn==0.20.3
+  ${SUDO_CMD} ${PIP_CMD} install scikit-learn
   ${SUDO_CMD} ${PIP_CMD} install --upgrade tb-nightly
+  ${PIP_CMD} install --user --upgrade flatbuffers
   ${PIP_CMD} install --user --upgrade attrs
   ${PIP_CMD} install --user --upgrade tf-estimator-nightly
   ${PIP_CMD} install --user --upgrade "future>=0.17.1"
-  # ===================================================================
+  ${PIP_CMD} install --user --upgrade wrapt
+  # LINT.ThenChange(:ubuntu_16_pip_installations)
 }
 
 function install_ubuntu_16_pip_deps {
@@ -165,25 +164,26 @@ function install_ubuntu_16_pip_deps {
     shift
   done
 
-  # TODO(hyey): Add back IfChange lint check (b/143530103).
-  # ===================================================================
-  # Please change dependencies in `install_pip_deps` as well.
-  # ===================================================================
+  # LINT.IfChange(ubuntu_16_pip_installations)
+  "${PIP_CMD}" install astunparse==1.6.3 --user
   "${PIP_CMD}" install --user --upgrade attrs
-  "${PIP_CMD}" install keras_applications==1.0.8 --no-deps --user
+  "${PIP_CMD}" install --user --upgrade flatbuffers
   "${PIP_CMD}" install keras_preprocessing==1.1.0 --no-deps --user
-  "${PIP_CMD}" install numpy==1.14.5 --user
+  "${PIP_CMD}" install numpy==1.16.0 --user
   "${PIP_CMD}" install --user --upgrade "future>=0.17.1"
-  "${PIP_CMD}" install gast==0.2.2 --user
-  "${PIP_CMD}" install h5py==2.8.0 --user
+  "${PIP_CMD}" install gast==0.3.3 --user
+  "${PIP_CMD}" install h5py==2.10.0 --user
   "${PIP_CMD}" install six==1.12.0 --user
   "${PIP_CMD}" install grpcio --user
   "${PIP_CMD}" install portpicker --user
   "${PIP_CMD}" install scipy --user
   "${PIP_CMD}" install scikit-learn --user
-  "${PIP_CMD}" install --user --upgrade tf-estimator-nightly
+  "${PIP_CMD}" install PyYAML==3.13 --user
+  # b/156523241
+  "${PIP_CMD}" install --force-reinstall --user --upgrade tf-estimator-nightly
   "${PIP_CMD}" install --user --upgrade tb-nightly
-  # ===================================================================
+  "${PIP_CMD}" install --user --upgrade wrapt
+  # LINT.ThenChange(:ubuntu_pip_installations)
 }
 
 function install_macos_pip_deps {
@@ -213,18 +213,20 @@ function install_macos_pip_deps {
 
   # TODO(aselle): Change all these to be --user instead of sudo.
   ${SUDO_CMD} ${PIP_CMD} install --upgrade setuptools==39.1.0
-  ${SUDO_CMD} ${PIP_CMD} install keras_applications==1.0.8 --no-deps
   ${SUDO_CMD} ${PIP_CMD} install keras_preprocessing==1.1.0 --no-deps
   ${SUDO_CMD} ${PIP_CMD} install --upgrade mock portpicker scipy grpcio
   ${SUDO_CMD} ${PIP_CMD} install six==1.12.0
-  ${SUDO_CMD} ${PIP_CMD} install scikit-learn==0.20.3
-  ${SUDO_CMD} ${PIP_CMD} install numpy==1.14.5
-  ${SUDO_CMD} ${PIP_CMD} install gast==0.2.2
-  ${SUDO_CMD} ${PIP_CMD} install h5py==2.8.0
+  ${SUDO_CMD} ${PIP_CMD} install scikit-learn
+  ${SUDO_CMD} ${PIP_CMD} install numpy==1.16.0
+  ${SUDO_CMD} ${PIP_CMD} install gast==0.3.3
+  ${SUDO_CMD} ${PIP_CMD} install h5py==2.10.0
   ${SUDO_CMD} ${PIP_CMD} install --upgrade grpcio
   ${SUDO_CMD} ${PIP_CMD} install --upgrade tb-nightly
+  ${PIP_CMD} install --user --upgrade flatbuffers
   ${PIP_CMD} install --user --upgrade attrs
-  ${PIP_CMD} install --user --upgrade tf-estimator-nightly
+  # b/156523241
+  ${PIP_CMD} install --force-reinstall --user --upgrade tf-estimator-nightly
+  ${PIP_CMD} install --user --upgrade wrapt
   ${PIP_CMD} install --user --upgrade "future>=0.17.1"
 }
 
@@ -262,7 +264,7 @@ function copy_to_new_project_name {
   ORIGINAL_WHL_DIR_PREFIX="${ORIGINAL_PROJECT_NAME}-${VERSION}"
   NEW_WHL_DIR_PREFIX="${NEW_PROJECT_NAME}-${VERSION}"
   mv "${ORIGINAL_WHL_DIR_PREFIX}.dist-info" "${NEW_WHL_DIR_PREFIX}.dist-info"
-  mv "${ORIGINAL_WHL_DIR_PREFIX}.data" "${NEW_WHL_DIR_PREFIX}.data"
+  mv "${ORIGINAL_WHL_DIR_PREFIX}.data" "${NEW_WHL_DIR_PREFIX}.data" || echo
   sed -i.bak "s/${ORIGINAL_PROJECT_NAME}/${NEW_PROJECT_NAME}/g" "${NEW_WHL_DIR_PREFIX}.dist-info/RECORD"
 
   ORIGINAL_PROJECT_NAME_DASH="${ORIGINAL_PROJECT_NAME//_/-}"
@@ -274,5 +276,46 @@ function copy_to_new_project_name {
   popd
   rm -rf "${TMP_DIR}"
 }
-# LINT.ThenChange(
-# ) # common.sh
+
+# Create minimalist test XML for web view. It includes the pass/fail status
+# of each target, without including errors or stacktraces.
+# Remember to "set +e" before calling bazel or we'll only generate the XML for
+# passing runs.
+function test_xml_summary {
+  set +x
+  set +e
+  mkdir -p "${KOKORO_ARTIFACTS_DIR}/${KOKORO_JOB_NAME}/summary"
+  # First build the repeated inner XML blocks, since the header block needs to
+  # report the number of test cases / failures / errors.
+  # TODO(rsopher): handle build breakages
+  # TODO(rsopher): extract per-test times as well
+  TESTCASE_XML="$(sed -n '/INFO:\ Build\ completed/,/INFO:\ Build\ completed/p' \
+    /tmpfs/kokoro_build.log \
+    | grep -E '(PASSED|FAILED|TIMEOUT)\ in' \
+    | while read -r line; \
+      do echo '<testcase name="'"$(echo "${line}" | tr -s ' ' | cut -d ' ' -f 1)"\
+          '" status="run" classname="" time="0">'"$( \
+        case "$(echo "${line}" | tr -s ' ' | cut -d ' ' -f 2)" in \
+          FAILED) echo '<failure message="" type=""/>' ;; \
+          TIMEOUT) echo '<failure message="timeout" type=""/>' ;; \
+        esac; \
+      )"'</testcase>'; done; \
+  )"
+  NUMBER_OF_TESTS="$(echo "${TESTCASE_XML}" | wc -l)"
+  NUMBER_OF_FAILURES="$(echo "${TESTCASE_XML}" | grep -c '<failure')"
+  echo '<?xml version="1.0" encoding="UTF-8"?>'\
+  '<testsuites name="1"  tests="1" failures="0" errors="0" time="0">'\
+  '<testsuite name="Kokoro Summary" tests="'"${NUMBER_OF_TESTS}"\
+  '" failures="'"${NUMBER_OF_FAILURES}"'" errors="0" time="0">'\
+  "${TESTCASE_XML}"'</testsuite></testsuites>'\
+  > "${KOKORO_ARTIFACTS_DIR}/${KOKORO_JOB_NAME}/summary/sponge_log.xml"
+}
+
+# Create minimalist test XML for web view, then exit.
+# Ends script with value of previous command, meant to be called immediately
+# after bazel as the last call in the build script.
+function test_xml_summary_exit {
+  RETVAL=$?
+  test_xml_summary
+  exit "${RETVAL}"
+}

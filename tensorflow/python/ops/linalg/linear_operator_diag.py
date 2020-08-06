@@ -183,6 +183,10 @@ class LinearOperatorDiag(linear_operator.LinearOperator):
     k = d_shape[-1]
     return array_ops.concat((d_shape, [k]), 0)
 
+  @property
+  def diag(self):
+    return self._diag
+
   def _assert_non_singular(self):
     return linear_operator_util.assert_no_entries_with_modulus_zero(
         self._diag,
@@ -247,8 +251,9 @@ class LinearOperatorDiag(linear_operator.LinearOperator):
     return array_ops.matrix_set_diag(x, new_diag)
 
   def _eigvals(self):
-    return ops.convert_to_tensor(self.diag)
+    return ops.convert_to_tensor_v2_with_dispatch(self.diag)
 
-  @property
-  def diag(self):
-    return self._diag
+  def _cond(self):
+    abs_diag = math_ops.abs(self.diag)
+    return (math_ops.reduce_max(abs_diag, axis=-1) /
+            math_ops.reduce_min(abs_diag, axis=-1))

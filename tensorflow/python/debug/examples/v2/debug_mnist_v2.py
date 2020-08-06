@@ -28,10 +28,6 @@ import sys
 import absl
 import tensorflow.compat.v2 as tf
 
-# TODO(cais): Use public API `tf.debugging.enable_dumping()` once it's
-# available.
-from tensorflow.python.debug.lib import dumping_callback
-
 IMAGE_SIZE = 28
 HIDDEN_SIZE = 500
 NUM_LABELS = 10
@@ -102,15 +98,18 @@ def parse_args():
   parser.add_argument(
       "--dump_tensor_debug_mode",
       type=str,
-      default="NO_TENSOR",
-      help="Mode for dumping tensor values. Options: NO_TENSOR, FULL_TENSOR. "
-      "This is relevant only when --dump_dir is set.")
+      default="FULL_HEALTH",
+      help="Mode for dumping tensor values. Options: NO_TENSOR, CURT_HEALTH, "
+      "CONCISE_HEALTH, SHAPE, FULL_HEALTH. This is relevant only when "
+      "--dump_dir is set.")
   # TODO(cais): Add more tensor debug mode strings once they are supported.
   parser.add_argument(
       "--dump_circular_buffer_size",
       type=int,
-      default=1000,
+      default=-1,
       help="Size of the circular buffer used to dump execution events. "
+      "A value <= 0 disables the circular-buffer behavior and causes "
+      "all instrumented tensor values to be dumped. "
       "This is relevant only when --dump_dir is set.")
   parser.add_argument(
       "--use_random_config_path",
@@ -131,7 +130,7 @@ def main(_):
   if FLAGS.check_numerics:
     tf.debugging.enable_check_numerics()
   elif FLAGS.dump_dir:
-    dumping_callback.enable_dumping(
+    tf.debugging.experimental.enable_dump_debug_info(
         FLAGS.dump_dir,
         tensor_debug_mode=FLAGS.dump_tensor_debug_mode,
         circular_buffer_size=FLAGS.dump_circular_buffer_size)
@@ -181,9 +180,9 @@ def main(_):
     return activations
 
   # init model
-  hidden = get_dense_weights(IMAGE_SIZE**2, HIDDEN_SIZE)
-  logits = get_dense_weights(HIDDEN_SIZE, NUM_LABELS)
-  variables = hidden + logits
+  hidden_weights = get_dense_weights(IMAGE_SIZE**2, HIDDEN_SIZE)
+  output_weights = get_dense_weights(HIDDEN_SIZE, NUM_LABELS)
+  variables = hidden_weights + output_weights
 
   @tf.function
   def model(x):
@@ -196,15 +195,25 @@ def main(_):
     Returns:
       A (?, 10) tensor containing the class scores for each example.
     """
-    hidden_act = dense_layer(hidden, x)
-    logits_act = dense_layer(logits, hidden_act, tf.identity)
+    hidden_act = dense_layer(hidden_weights, x)
+    logits_act = dense_layer(output_weights, hidden_act, tf.identity)
     y = tf.nn.softmax(logits_act)
     return y
 
   @tf.function
-  def loss(logits, labels):
-    """Calculates cross entropy loss."""
-    diff = -(labels * tf.math.log(logits))
+  def loss(probs, labels):
+    """Calculates cross entropy loss.
+
+    Args:
+      probs: Class probabilities predicted by the model. The shape is expected
+        to be (?, 10).
+      labels: Truth labels for the classes, as one-hot encoded vectors. The
+        shape is expected to be the same as `probs`.
+
+    Returns:
+      A scalar loss tensor.
+    """
+    diff = -labels * tf.math.log(probs)
     loss = tf.reduce_mean(diff)
     return loss
 

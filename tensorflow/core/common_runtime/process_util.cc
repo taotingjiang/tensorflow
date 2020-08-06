@@ -34,10 +34,15 @@ namespace tensorflow {
 
 namespace {
 
+// Use environment setting if specified (init once)
+int32 GetEnvNumInterOpThreads() {
+  static int32 env_num_threads = NumInterOpThreadsFromEnvironment();
+  return env_num_threads;
+}
+
 int32 DefaultNumInterOpThreads() {
 #ifndef __ANDROID__
-  // Use environment setting if specified (init once)
-  static int env_num_threads = NumInterOpThreadsFromEnvironment();
+  int32 env_num_threads = GetEnvNumInterOpThreads();
   if (env_num_threads > 0) {
     return env_num_threads;
   }
@@ -96,8 +101,7 @@ int32 NumIntraOpThreadsFromEnvironment() {
   const char* val = std::getenv("TF_NUM_INTRAOP_THREADS");
   return (val && strings::safe_strto32(val, &num)) ? num : 0;
 }
-
-#ifdef INTEL_MKL
+#if !defined(ENABLE_MKLDNN_THREADPOOL) && defined(INTEL_MKL)
 int32 OMPThreadsFromEnvironment() {
   // 1) std::getenv is thread-safe (as long as no other function modifies the
   // host env) from C++11 onward. 2) Most of TF code (except tests and
@@ -117,11 +121,14 @@ int32 DefaultNumIntraOpThreads() {
   // Default to the maximum parallelism for the current process.
   return port::MaxParallelism();
 }
-#endif  // INTEL_MKL
+#endif  // !defined(ENABLE_MKLDNN_THREADPOOL) && defined(INTEL_MKL)
 int32 NumInterOpThreadsFromSessionOptions(const SessionOptions& options) {
   const int32 inter_op = options.config.inter_op_parallelism_threads();
   if (inter_op > 0) return inter_op;
-#ifdef INTEL_MKL
+  const int32 env_inter_op = GetEnvNumInterOpThreads();
+  if (env_inter_op > 0) return env_inter_op;
+
+#if !defined(ENABLE_MKLDNN_THREADPOOL) && defined(INTEL_MKL)
   if (!DisableMKL()) {
     // MKL library executes ops in parallel using OMP threads.
     // Setting inter_op conservatively to avoid thread oversubscription that
@@ -142,7 +149,7 @@ int32 NumInterOpThreadsFromSessionOptions(const SessionOptions& options) {
         << ". Tune using inter_op_parallelism_threads for best performance.";
     return mkl_inter_op;
   }
-#endif  // INTEL_MKL
+#endif  // !defined(ENABLE_MKLDNN_THREADPOOL) && defined(INTEL_MKL)
   return DefaultNumInterOpThreads();
 }
 

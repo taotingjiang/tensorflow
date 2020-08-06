@@ -152,7 +152,7 @@ class _BaseLinearOperatorCirculant(linear_operator.LinearOperator):
         |z y x w|
     ```
 
-    `block_depth = 2` means `A` is block symmetric circulant with symemtric
+    `block_depth = 2` means `A` is block symmetric circulant with symmetric
     circulant blocks.  For example, with `W`, `X`, `Y`, `Z` symmetric circulant,
 
     ```
@@ -378,7 +378,7 @@ class _BaseLinearOperatorCirculant(linear_operator.LinearOperator):
 
   def _broadcast_batch_dims(self, x, spectrum):
     """Broadcast batch dims of batch matrix `x` and spectrum."""
-    spectrum = ops.convert_to_tensor(spectrum, name="spectrum")
+    spectrum = ops.convert_to_tensor_v2_with_dispatch(spectrum, name="spectrum")
     # spectrum.shape = batch_shape + block_shape
     # First make spectrum a batch matrix with
     #   spectrum.shape = batch_shape + [prod(block_shape), 1]
@@ -537,8 +537,6 @@ class LinearOperatorCirculant(_BaseLinearOperatorCirculant):
   This means that the result of matrix multiplication `v = Au` has `Lth` column
   given circular convolution between `h` with the `Lth` column of `u`.
 
-  See http://ee.stanford.edu/~gray/toeplitz.pdf
-
   #### Description in terms of the frequency spectrum
 
   There is an equivalent description in terms of the [batch] spectrum `H` and
@@ -694,6 +692,11 @@ class LinearOperatorCirculant(_BaseLinearOperatorCirculant):
   * If `is_X == False`, callers should expect the operator to not have `X`.
   * If `is_X == None` (the default), callers should have no expectation either
     way.
+
+  References:
+    Toeplitz and Circulant Matrices - A Review:
+      [Gray, 2006](https://www.nowpublishers.com/article/Details/CIT-006)
+      ([pdf](https://ee.stanford.edu/~gray/toeplitz.pdf))
   """
 
   def __init__(self,
@@ -752,7 +755,7 @@ class LinearOperatorCirculant(_BaseLinearOperatorCirculant):
         name=name)
 
   def _eigvals(self):
-    return ops.convert_to_tensor(self.spectrum)
+    return ops.convert_to_tensor_v2_with_dispatch(self.spectrum)
 
 
 @tf_export("linalg.LinearOperatorCirculant2D")

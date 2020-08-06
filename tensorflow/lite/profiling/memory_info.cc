@@ -26,7 +26,13 @@ namespace memory {
 
 const int MemoryUsage::kValueNotSet = 0;
 
-// TODO(b/139812778): Support to retrieve memory usage on other platforms.
+bool MemoryUsage::IsSupported() {
+#ifdef __linux__
+  return true;
+#endif
+  return false;
+}
+
 MemoryUsage GetMemoryUsage() {
   MemoryUsage result;
 #ifdef __linux__
@@ -35,9 +41,18 @@ MemoryUsage GetMemoryUsage() {
     result.max_rss_kb = res.ru_maxrss;
   }
   const auto mem = mallinfo();
-  result.total_allocated_bytes = mem.uordblks;
+  result.total_allocated_bytes = mem.arena;
+  result.in_use_allocated_bytes = mem.uordblks;
 #endif
   return result;
+}
+
+void MemoryUsage::AllStatsToStream(std::ostream* stream) const {
+  *stream << "max resident set size = " << max_rss_kb / 1024.0
+          << " MB, total malloc-ed size = "
+          << total_allocated_bytes / 1024.0 / 1024.0
+          << " MB, in-use allocated/mmapped size = "
+          << in_use_allocated_bytes / 1024.0 / 1024.0 << " MB";
 }
 
 }  // namespace memory

@@ -160,7 +160,7 @@ class LinearOperatorFullMatrix(linear_operator.LinearOperator):
         dtypes.complex128,
     ]
 
-    matrix = ops.convert_to_tensor(matrix, name="matrix")
+    matrix = ops.convert_to_tensor_v2_with_dispatch(matrix, name="matrix")
 
     dtype = matrix.dtype
     if dtype not in allowed_dtypes:
@@ -182,6 +182,9 @@ class LinearOperatorFullMatrix(linear_operator.LinearOperator):
   def _matmul(self, x, adjoint=False, adjoint_arg=False):
     return math_ops.matmul(
         self._matrix, x, adjoint_a=adjoint, adjoint_b=adjoint_arg)
+
+  def _solve(self, rhs, adjoint=False, adjoint_arg=False):
+    return self._dense_solve(rhs, adjoint=adjoint, adjoint_arg=adjoint_arg)
 
   def _to_dense(self):
     return self._matrix

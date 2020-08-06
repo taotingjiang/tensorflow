@@ -20,6 +20,8 @@ source tensorflow/tools/ci_build/release/common.sh
 
 # Install python dependencies
 install_ubuntu_16_pip_deps pip2.7
+# Update Bazel to the desired version
+install_bazelisk
 
 # Run configure.
 export TF_NEED_GCP=1
@@ -33,13 +35,15 @@ yes "" | "$PYTHON_BIN_PATH" configure.py
 tag_filters="-no_oss,-oss_serial,-gpu,-tpu,-benchmark-test,-no_oss_py2,-v1only"
 
 # Get the default test targets for bazel.
-source tensorflow/tools/ci_build/build_scripts/PRESUBMIT_BUILD_TARGETS.sh
+source tensorflow/tools/ci_build/build_scripts/DEFAULT_TEST_TARGETS.sh
 
 # Run tests
+set +e
 bazel test --test_output=errors --config=opt --test_lang_filters=py \
-  --crosstool_top=//third_party/toolchains/preconfig/ubuntu16.04/gcc7_manylinux2010-nvcc-cuda10.0:toolchain \
+  --crosstool_top=//third_party/toolchains/preconfig/ubuntu16.04/gcc7_manylinux2010-nvcc-cuda10.1:toolchain \
   --linkopt=-lrt \
   --action_env=TF2_BEHAVIOR="${TF2_BEHAVIOR}" \
   --build_tag_filters="${tag_filters}" \
   --test_tag_filters="${tag_filters}" -- \
   ${DEFAULT_BAZEL_TARGETS} -//tensorflow/lite/...
+test_xml_summary_exit

@@ -43,22 +43,42 @@ struct TensorProperty {
   // Constraints.
   bool restriction = false;
   // scale/zero_point hardcoded.
-  std::pair<float, int> restricted_value = {0.0, 0};
+  std::pair<float, int> restricted_value_int8 = {0.0f, 0};
+  std::pair<float, int> restricted_value_int16 = {0.0f, 0};
+
+  // Use derived scale.
+  bool use_derived_scale = false;
+  // The derived scale.
+  DerivedScale derived_scale;
+
+  // The number of bits for this tensor. It could be 8, 16, 32 or even not power
+  // of two.
+  int number_of_bits = 8;
+
+  // Extend the range to power of two.
+  bool extend_to_power_of_two = false;
+
+  // State tensor.
+  bool state_tensor = false;
 };
 
 struct OperatorProperty {
   // Is a quantized operations currently supported.
   bool quantizable = true;
-
+  // Is a quantized operations currently supported for 16x8
+  bool quantizable_int16 = true;
   // Op has arbitrary number of inputs, such as concat.
   bool arbitrary_inputs = false;
   // Op has arbitrary number of outputs, such as slice.
   bool arbitrary_outputs = false;
   // Input indexes -> input tensor property.
+  // Must be topologically sorted since there are derived scales.
   std::vector<std::pair<int, TensorProperty>> inputs = {};
   // Output indexes -> output tensor property.
   std::vector<std::pair<int, TensorProperty>> outputs = {};
   // Bias indexes.
+  // TODO(jianlijianli): remove this by putting biases into inputs as well since
+  // we now can model "derived scale".
   std::vector<int> biases = {};
 
   // Intermediate indexes -> intermediate tensor property.
@@ -67,8 +87,21 @@ struct OperatorProperty {
   // Force output to reuse the same scale and zero point of input.
   bool restrict_same_input_output_scale = false;
 
+  // Use same min of min and max of max for each group.
+  // Incompatible with restrict_same_input_output_scale and restricted_value.
+  // TODO(jianlijianli): make it compatible with other restrictions when there
+  // is a use case.
+  std::vector<std::vector<int>> restrict_scale = {};
+
   // Op version.
   int version = 1;
+
+  // When we quantize activations into 16 bit and weights into 8 bit,
+  // we want to quantize all inputs, including constant tensors,
+  // for the operators like Add, Mul into 16-bit as well. The constant
+  // inputs are quantized as weights and this variable indicates
+  // that we want to do quantizations of these tensors as activations.
+  bool quantize_input_as_activations = false;
 };
 
 OperatorProperty GetOperatorProperty(const ModelT* model, int subgraph_index,

@@ -28,7 +28,7 @@ namespace {
 
 StatusOr<bool> ReplaceGetSize(
     HloInstruction* instr,
-    const DynamicDimensionInference* dynamic_dimension_inference) {
+    DynamicDimensionInference* dynamic_dimension_inference) {
   if (instr->opcode() != HloOpcode::kGetDimensionSize) {
     return false;
   }
@@ -47,11 +47,18 @@ StatusOr<bool> ReplaceGetSize(
       dynamic_dimension_inference->GetDynamicSize(operand, {}, dim);
   if (dynamic_size != nullptr) {
     TF_RETURN_IF_ERROR(instr->ReplaceAllUsesWith(dynamic_size));
+    // The dependency between a instruction and its dynamic dimensions is not
+    // modeled in the IR. As instr is being replaced by dynamic_size, also tell
+    // dynamic dimension inference that the instruction is being replaced.
+    dynamic_dimension_inference->ReplaceAllDynamicDimensionUsesWith(
+        instr, dynamic_size);
   } else {
     int32 size = instr->operand(0)->shape().dimensions(dim);
     HloInstruction* new_instr = computation->AddInstruction(
         HloInstruction::CreateConstant(LiteralUtil::CreateR0<int32>(size)));
     TF_RETURN_IF_ERROR(instr->ReplaceAllUsesWith(new_instr));
+    dynamic_dimension_inference->ReplaceAllDynamicDimensionUsesWith(instr,
+                                                                    new_instr);
   }
   return true;
 }
@@ -61,7 +68,8 @@ StatusOr<bool> ReplaceSetSize(HloInstruction* instr) {
     return false;
   }
 
-  TF_RET_CHECK(ShapeUtil::Equal(instr->shape(), instr->operand(0)->shape()))
+  TF_RET_CHECK(Shape::Equal().IgnoreDynamicDimension()(
+      instr->shape(), instr->operand(0)->shape()))
       << "instr->shape() " << instr->shape().ToString() << " , "
       << "instruction operand shape " << instr->operand(0)->shape();
   HloInstruction* operand = instr->mutable_operand(0);
@@ -78,12 +86,32 @@ StatusOr<bool> HloGetDimensionSizeRewriter::Run(HloModule* module) {
   TF_ASSIGN_OR_RETURN(DynamicDimensionInference inference,
                       DynamicDimensionInference::Run(module));
   *proto.mutable_hlo_module() = module->ToProto();
+  // It's important to replace get-dimension-size first before
+  // set-dimension-size for the case below:
+  //  static_op    dynamic_size
+  //    |             |
+  //  set-dimension-size // Marks the dimension as dynamic
+  //    |
+  //  get-dimension-size
+  //
+  // If we replace set dimension size first, we'd have
+  //
+  //  static_op
+  //    |
+  //  get-dimension-size
+  //
+  // This will get static size of the op, which is incorrect.
   for (auto* computation : module->computations()) {
-    for (auto instruction : computation->instructions()) {
+    for (auto instruction : computation->MakeInstructionPostOrder()) {
       TF_ASSIGN_OR_RETURN(bool replaced_get_size,
                           ReplaceGetSize(instruction, &inference));
+      changed = changed || replaced_get_size;
+    }
+  }
+  for (auto* computation : module->computations()) {
+    for (auto instruction : computation->MakeInstructionPostOrder()) {
       TF_ASSIGN_OR_RETURN(bool replaced_set_size, ReplaceSetSize(instruction));
-      changed = changed || replaced_get_size || replaced_set_size;
+      changed = changed || replaced_set_size;
     }
   }
   return changed;

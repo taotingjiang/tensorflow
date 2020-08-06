@@ -17,7 +17,9 @@ limitations under the License.
 
 #include "absl/memory/memory.h"
 #include "tensorflow/lite/delegates/gpu/cl/kernels/convolution_transposed.h"
+#include "tensorflow/lite/delegates/gpu/cl/kernels/convolution_transposed_3x3.h"
 #include "tensorflow/lite/delegates/gpu/cl/kernels/convolution_transposed_3x3_thin.h"
+#include "tensorflow/lite/delegates/gpu/cl/kernels/convolution_transposed_4x4.h"
 #include "tensorflow/lite/delegates/gpu/cl/kernels/convolution_transposed_thin.h"
 #include "tensorflow/lite/delegates/gpu/cl/tensor_type.h"
 
@@ -26,7 +28,7 @@ namespace gpu {
 namespace cl {
 namespace {
 
-Status SelectConvolutionTransposedAdreno(
+absl::Status SelectConvolutionTransposedAdreno(
     const ConvolutionTransposedAttributes& attr,
     const CreationContext& creation_context, const OperationDef& op_def,
     std::unique_ptr<GPUOperation>* ptr) {
@@ -47,10 +49,10 @@ Status SelectConvolutionTransposedAdreno(
         CreateConvolutionTransposed(creation_context, op_def, attr, &conv));
     *ptr = absl::make_unique<ConvolutionTransposed>(std::move(conv));
   }
-  return OkStatus();
+  return absl::OkStatus();
 }
 
-Status SelectConvolutionTransposedPowerVR(
+absl::Status SelectConvolutionTransposedPowerVR(
     const ConvolutionTransposedAttributes& attr,
     const CreationContext& creation_context, const OperationDef& op_def,
     std::unique_ptr<GPUOperation>* ptr) {
@@ -65,16 +67,28 @@ Status SelectConvolutionTransposedPowerVR(
     RETURN_IF_ERROR(CreateConvolutionTransposed3x3Thin(creation_context, op_def,
                                                        attr, &conv));
     *ptr = absl::make_unique<ConvolutionTransposed3x3Thin>(std::move(conv));
+  } else if (IsConvolutionTransposed3x3Supported(*creation_context.device,
+                                                 op_def, attr)) {
+    ConvolutionTransposed3x3 conv;
+    RETURN_IF_ERROR(
+        CreateConvolutionTransposed3x3(creation_context, op_def, attr, &conv));
+    *ptr = absl::make_unique<ConvolutionTransposed3x3>(std::move(conv));
+  } else if (IsConvolutionTransposed4x4Supported(*creation_context.device,
+                                                 op_def, attr)) {
+    ConvolutionTransposed4x4 conv;
+    RETURN_IF_ERROR(
+        CreateConvolutionTransposed4x4(creation_context, op_def, attr, &conv));
+    *ptr = absl::make_unique<ConvolutionTransposed4x4>(std::move(conv));
   } else {
     ConvolutionTransposed conv;
     RETURN_IF_ERROR(
         CreateConvolutionTransposed(creation_context, op_def, attr, &conv));
     *ptr = absl::make_unique<ConvolutionTransposed>(std::move(conv));
   }
-  return OkStatus();
+  return absl::OkStatus();
 }
 
-Status SelectConvolutionTransposedMali(
+absl::Status SelectConvolutionTransposedMali(
     const ConvolutionTransposedAttributes& attr,
     const CreationContext& creation_context, const OperationDef& op_def,
     std::unique_ptr<GPUOperation>* ptr) {
@@ -82,27 +96,28 @@ Status SelectConvolutionTransposedMali(
   RETURN_IF_ERROR(
       CreateConvolutionTransposed(creation_context, op_def, attr, &conv));
   *ptr = absl::make_unique<ConvolutionTransposed>(std::move(conv));
-  return OkStatus();
+  return absl::OkStatus();
 }
+
 }  // namespace
 
-Status SelectConvolutionTransposed(const ConvolutionTransposedAttributes& attr,
-                                   const CreationContext& creation_context,
-                                   const OperationDef& op_def,
-                                   std::unique_ptr<GPUOperation>* ptr) {
-  switch (creation_context.device->vendor()) {
-    case Vendor::QUALCOMM:
-      return SelectConvolutionTransposedAdreno(attr, creation_context, op_def,
-                                               ptr);
-    case Vendor::POWERVR:
-      return SelectConvolutionTransposedPowerVR(attr, creation_context, op_def,
-                                                ptr);
-    case Vendor::MALI:
-      return SelectConvolutionTransposedMali(attr, creation_context, op_def,
+absl::Status SelectConvolutionTransposed(
+    const ConvolutionTransposedAttributes& attr,
+    const CreationContext& creation_context, const OperationDef& op_def,
+    std::unique_ptr<GPUOperation>* ptr) {
+  const auto& device_info = creation_context.device->GetInfo();
+  if (device_info.IsAdreno()) {
+    return SelectConvolutionTransposedAdreno(attr, creation_context, op_def,
                                              ptr);
-    default:
-      return SelectConvolutionTransposedAdreno(attr, creation_context, op_def,
-                                               ptr);
+  } else if (device_info.IsPowerVR() || device_info.IsAMD() ||
+             device_info.IsNvidia() || device_info.IsIntel()) {
+    return SelectConvolutionTransposedPowerVR(attr, creation_context, op_def,
+                                              ptr);
+  } else if (device_info.IsMali()) {
+    return SelectConvolutionTransposedMali(attr, creation_context, op_def, ptr);
+  } else {
+    return SelectConvolutionTransposedAdreno(attr, creation_context, op_def,
+                                             ptr);
   }
 }
 

@@ -25,9 +25,11 @@ limitations under the License.
 #include <vector>
 
 #include "absl/algorithm/container.h"
+#include "absl/base/thread_annotations.h"
 #include "absl/container/inlined_vector.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
+#include "absl/strings/str_join.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 #include "tensorflow/compiler/xla/status.h"
@@ -89,26 +91,29 @@ using DimensionVector = absl::InlinedVector<int64, kInlineRank>;
 #define XLA_SCOPED_LOGGING_TIMER_HELPER2(label, level, counter)      \
   static ::xla::TimerStats XLA_TimerStats##counter;                  \
   ::xla::ScopedLoggingTimer XLA_ScopedLoggingTimerInstance##counter( \
-      label, /*enabled=*/VLOG_IS_ON(level), &XLA_TimerStats##counter);
+      label, /*enabled=*/VLOG_IS_ON(level), __FILE__, __LINE__,      \
+      &XLA_TimerStats##counter);
 
 struct TimerStats {
   tensorflow::mutex stats_mutex;
-  double cumulative_secs GUARDED_BY(stats_mutex) = 0;
-  double max_secs GUARDED_BY(stats_mutex) = 0;
-  uint64 times_called GUARDED_BY(stats_mutex) = 0;
+  double cumulative_secs ABSL_GUARDED_BY(stats_mutex) = 0;
+  double max_secs ABSL_GUARDED_BY(stats_mutex) = 0;
+  uint64 times_called ABSL_GUARDED_BY(stats_mutex) = 0;
 };
 
 // RAII timer for XLA_SCOPED_LOGGING_TIMER and XLA_SCOPED_LOGGING_TIMER_LEVEL
 // macros above.  Recommended usage is via the macros so you don't have to give
 // the timer a name or worry about calling VLOG_IS_ON yourself.
-struct ScopedLoggingTimer {
-  // The timer does nothing if enabled is false.  This lets you pass in your
-  // file's VLOG_IS_ON value.
-  //
-  // timer_stats is unowned non-null pointer which is used to populate the
+class ScopedLoggingTimer {
+ public:
+  // label: Label to display for logging.
+  // enabled: Whether this timer should do anything at all.
+  // file: Filename to display in logging.
+  // line: Line number to display in logging.
+  // `timer_stats`: unowned non-null pointer which is used to populate the
   // global timer statistics.
-  ScopedLoggingTimer(const std::string& label, bool enabled,
-                     TimerStats* timer_stats);
+  ScopedLoggingTimer(const std::string& label, bool enabled, const char* file,
+                     int line, TimerStats* timer_stats);
 
   // Stop the timer and log the tracked time. Timer is disabled after this
   // function is called.
@@ -116,10 +121,13 @@ struct ScopedLoggingTimer {
 
   ~ScopedLoggingTimer();
 
-  bool enabled;
-  string label;
-  uint64 start_micros;
-  TimerStats* timer_stats;
+ private:
+  bool enabled_;
+  const char* file_;
+  int line_;
+  string label_;
+  uint64 start_micros_;
+  TimerStats* timer_stats_;
 };
 
 // Given a vector<T>, returns a Span<char> that points at its
@@ -498,6 +506,18 @@ int64 Product(absl::Span<const int64> xs);
 // possible such subsequences; else, returns `{(0, 0), (a.size, b.size)}`.
 absl::InlinedVector<std::pair<int64, int64>, 8> CommonFactors(
     absl::Span<const int64> a, absl::Span<const int64> b);
+
+struct ConvertedDimensionNumbers {
+  DimensionVector transformed_from_dimensions;
+  DimensionVector untransformed_from_dimensions;
+  DimensionVector to_dimensions;
+};
+
+// Convert and unsorted list of dimensions from one shapes dimension sizes to
+// another shapes dimensions sizes.
+ConvertedDimensionNumbers ConvertDimensionNumbers(
+    absl::Span<const int64> from_dimensions, absl::Span<const int64> from_sizes,
+    absl::Span<const int64> to_sizes);
 
 // Removes illegal characters from filenames.
 string SanitizeFileName(string file_name);

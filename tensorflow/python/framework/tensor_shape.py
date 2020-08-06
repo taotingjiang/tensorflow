@@ -22,7 +22,6 @@ import six
 from tensorflow.core.framework import tensor_shape_pb2
 from tensorflow.python import tf2
 from tensorflow.python.eager import monitoring
-from tensorflow.python.util import deprecation
 from tensorflow.python.util.tf_export import tf_export
 
 _TENSORSHAPE_V2_OVERRIDE = None
@@ -185,10 +184,14 @@ class Dimension(object):
 
   def __init__(self, value):
     """Creates a new Dimension with the given value."""
-    if value is None:
+    if isinstance(value, int):  # Most common case.
+      if value < 0:
+        raise ValueError("Dimension %d must be >= 0" % value)
+      self._value = value
+    elif value is None:
       self._value = None
     elif isinstance(value, Dimension):
-      self._value = value
+      self._value = value._value
     else:
       try:
         # int(...) compensates for the int/long dichotomy on Python 2.X.
@@ -197,8 +200,8 @@ class Dimension(object):
       except AttributeError:
         six.raise_from(
             TypeError("Dimension value must be integer or None or have "
-                      "an __index__ method, got {!r}".format(value)),
-            None)
+                      "an __index__ method, got value '{0!r}' with type '{1!r}'"
+                      .format(value, type(value))), None)
       if self._value < 0:
         raise ValueError("Dimension %d must be >= 0" % self._value)
 
@@ -557,7 +560,7 @@ class Dimension(object):
   def __mod__(self, other):
     """Returns `self` modulo `other`.
 
-    Dimension moduli are computed as follows:
+    Dimension modulo are computed as follows:
 
     ```python
     tf.compat.v1.Dimension(m)    % tf.compat.v1.Dimension(n)     ==
@@ -749,7 +752,9 @@ class TensorShape(object):
     Raises:
       TypeError: If dims cannot be converted to a list of dimensions.
     """
-    if dims is None:
+    if isinstance(dims, (tuple, list)):  # Most common case.
+      self._dims = [Dimension(d) for d in dims]
+    elif dims is None:
       self._dims = None
     elif isinstance(dims, tensor_shape_pb2.TensorShapeProto):
       if dims.unknown_rank:
@@ -769,7 +774,18 @@ class TensorShape(object):
         # Treat as a singleton dimension
         self._dims = [as_dimension(dims)]
       else:
-        self._dims = [as_dimension(d) for d in dims_iter]
+        self._dims = []
+        for d in dims_iter:
+          try:
+            self._dims.append(as_dimension(d))
+          except TypeError as e:
+            six.raise_from(
+                TypeError(
+                    "Failed to convert '{0!r}' to a shape: '{1!r}'"
+                    "could not be converted to a dimension. A shape should "
+                    "either be single dimension (e.g. 10), or an iterable of "
+                    "dimensions (e.g. [1, 10, None])."
+                    .format(dims, d)), e)
 
   @property
   def _v2_behavior(self):
@@ -809,7 +825,14 @@ class TensorShape(object):
 
   @property
   def dims(self):
-    """Returns a list of Dimensions, or None if the shape is unspecified."""
+    """Deprecated.  Returns list of dimensions for this shape.
+
+    Suggest `TensorShape.as_list` instead.
+
+    Returns:
+      A list containing `tf.compat.v1.Dimension`s, or None if the shape is
+      unspecified.
+    """
     return self._dims
 
   @property
@@ -1233,36 +1256,3 @@ def unknown_shape(rank=None, **kwargs):
     return TensorShape(None)
   else:
     return TensorShape([Dimension(None)] * rank)
-
-
-@deprecation.deprecated(None, "Use tf.TensorShape([]).")
-def scalar():
-  """Returns a shape representing a scalar."""
-  return TensorShape([])
-
-
-@deprecation.deprecated(None, "Use tf.TensorShape([length]).")
-def vector(length):
-  """Returns a shape representing a vector.
-
-  Args:
-    length: The length of the vector, which may be None if unknown.
-
-  Returns:
-    A TensorShape representing a vector of the given length.
-  """
-  return TensorShape([length])
-
-
-@deprecation.deprecated(None, "Use tf.TensorShape([rows, cols]).")
-def matrix(rows, cols):
-  """Returns a shape representing a matrix.
-
-  Args:
-    rows: The number of rows in the matrix, which may be None if unknown.
-    cols: The number of columns in the matrix, which may be None if unknown.
-
-  Returns:
-    A TensorShape representing a matrix of the given size.
-  """
-  return TensorShape([rows, cols])

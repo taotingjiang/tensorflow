@@ -17,9 +17,13 @@ limitations under the License.
 // class declaration].
 #include "tensorflow/stream_executor/host/host_gpu_executor.h"
 
+#include <stdint.h>
 #include <string.h>
 
+#include "absl/strings/numbers.h"
+#include "absl/strings/str_cat.h"
 #include "absl/synchronization/notification.h"
+#include "tensorflow/core/platform/mem.h"
 #include "tensorflow/core/platform/profile_utils/cpu_utils.h"
 #include "tensorflow/stream_executor/host/host_platform_id.h"
 #include "tensorflow/stream_executor/host/host_stream.h"
@@ -41,9 +45,34 @@ HostExecutor::HostExecutor(const PluginConfig &plugin_config)
 
 HostExecutor::~HostExecutor() {}
 
+port::Status HostExecutor::Init(int device_ordinal,
+                                DeviceOptions device_options) {
+  auto it =
+      device_options.non_portable_tags.find("host_thread_stack_size_in_bytes");
+  if (it != device_options.non_portable_tags.end()) {
+    if (!absl::SimpleAtoi(it->second, &thread_stack_size_in_bytes_)) {
+      return port::InvalidArgumentError(absl::StrCat(
+          "Unable to parse host_thread_stack_size_in_bytes as an integer: ",
+          it->second));
+    }
+  }
+  return port::Status::OK();
+}
+
+bool HostExecutor::DeviceMemoryUsage(int64 *free, int64 *total) const {
+  tensorflow::port::MemoryInfo mem_info = tensorflow::port::GetMemoryInfo();
+  *free = (mem_info.free != INT64_MAX) ? mem_info.free : -1;
+  *total = (mem_info.total != INT64_MAX) ? mem_info.total : -1;
+  return true;
+}
+
 DeviceMemoryBase HostExecutor::Allocate(uint64 size, int64 memory_space) {
   CHECK_EQ(memory_space, 0);
-  return DeviceMemoryBase(new char[size], size);
+  // Use a minimum alignment of 64 bytes to be friendly to AVX512 code.
+  // This should probably be kept in sync with
+  // tensorflow::Allocator::kAllocatorAlignment.
+  return DeviceMemoryBase(
+      tensorflow::port::AlignedMalloc(size, /*minimum_alignment=*/64), size);
 }
 
 void *HostExecutor::GetSubBuffer(DeviceMemoryBase *parent, uint64 offset_bytes,
@@ -52,7 +81,7 @@ void *HostExecutor::GetSubBuffer(DeviceMemoryBase *parent, uint64 offset_bytes,
 }
 
 void HostExecutor::Deallocate(DeviceMemoryBase *mem) {
-  delete[] static_cast<char *>(mem->opaque());
+  tensorflow::port::AlignedFree(mem->opaque());
 }
 
 port::Status HostExecutor::SynchronousMemZero(DeviceMemoryBase *location,
@@ -325,6 +354,12 @@ rng::RngSupport *HostExecutor::CreateRng() {
   }
 
   return status.ValueOrDie()(this);
+}
+
+std::unique_ptr<internal::StreamInterface>
+HostExecutor::GetStreamImplementation() {
+  return std::unique_ptr<internal::StreamInterface>(
+      new HostStream(thread_stack_size_in_bytes_));
 }
 
 }  // namespace host

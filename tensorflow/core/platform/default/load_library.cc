@@ -17,13 +17,13 @@ limitations under the License.
 
 #include <dlfcn.h>
 
-#include "tensorflow/core/lib/core/errors.h"
+#include "tensorflow/core/platform/errors.h"
 
 namespace tensorflow {
 
 namespace internal {
 
-Status LoadLibrary(const char* library_filename, void** handle) {
+Status LoadDynamicLibrary(const char* library_filename, void** handle) {
   *handle = dlopen(library_filename, RTLD_NOW | RTLD_LOCAL);
   if (!*handle) {
     return errors::NotFound(dlerror());

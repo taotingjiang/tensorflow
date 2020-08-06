@@ -39,10 +39,12 @@ cc_toolchain_suite(
 
 cc_toolchain(
     name = "cc-compiler-local",
-    all_files = "%{linker_files}",
-    compiler_files = ":empty",
+    all_files = "%{compiler_deps}",
+    compiler_files = "%{compiler_deps}",
+    ar_files = "%{compiler_deps}",
+    as_files = "%{compiler_deps}",
     dwp_files = ":empty",
-    linker_files = "%{linker_files}",
+    linker_files = "%{compiler_deps}",
     objcopy_files = ":empty",
     strip_files = ":empty",
     # To support linker flags that need to go to the start of command line
@@ -66,14 +68,17 @@ cc_toolchain_config(
     linker_bin_path = "%{linker_bin_path}",
     builtin_sysroot = "%{builtin_sysroot}",
     cuda_path = "%{cuda_toolkit_path}",
+    compiler = "%{compiler}",
 )
 
 cc_toolchain(
     name = "cc-compiler-darwin",
-    all_files = "%{linker_files}",
-    compiler_files = ":empty",
+    all_files = "%{compiler_deps}",
+    compiler_files = "%{compiler_deps}",
+    ar_files = "%{compiler_deps}",
+    as_files = "%{compiler_deps}",
     dwp_files = ":empty",
-    linker_files = "%{linker_files}",
+    linker_files = "%{compiler_deps}",
     objcopy_files = ":empty",
     strip_files = ":empty",
     supports_param_files = 0,
@@ -95,10 +100,12 @@ cc_toolchain_config(
 
 cc_toolchain(
     name = "cc-compiler-windows",
-    all_files = "%{win_linker_files}",
-    compiler_files = ":empty",
+    all_files = "%{win_compiler_deps}",
+    compiler_files = "%{win_compiler_deps}",
+    ar_files = "%{win_compiler_deps}",
+    as_files = "%{win_compiler_deps}",
     dwp_files = ":empty",
-    linker_files = "%{win_linker_files}",
+    linker_files = "%{win_compiler_deps}",
     objcopy_files = ":empty",
     strip_files = ":empty",
     supports_param_files = 1,
@@ -118,6 +125,7 @@ cc_toolchain_config(
     msvc_lib_path = "%{msvc_lib_path}",
     msvc_link_path = "%{msvc_link_path}",
     msvc_ml_path = "%{msvc_ml_path}",
+    compiler = "msvc",
 )
 
 filegroup(
